@@ -1,0 +1,4 @@
+results/*
+!results/.gitkeep
+*.vvp
+obj_*/
