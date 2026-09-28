@@ -6,20 +6,25 @@
 // =============================================================================
 `timescale 1ns/1ps
 
-module tb_mac;
-    localparam int IN_W    = 8;
-    localparam int ACC_W   = 32;
+module tb_mac #(
+    parameter int IN_W  = 8,
+    parameter int ACC_W = 32,
+    parameter bit SAT   = 0
+);
     localparam int N_RAND  = 5000;
-
     logic                    clk = 0;
     logic                    rst_n;
     logic                    en, clr;
     logic signed [IN_W-1:0]  a, b;
     logic signed [ACC_W-1:0] acc;
 
-    mac #(.IN_W(IN_W), .ACC_W(ACC_W)) dut (.*);
+    mac #(.IN_W(IN_W), .ACC_W(ACC_W), .SAT(SAT)) dut (.*);
 
     always #5 clk = ~clk;   // 100 MHz
+
+    // ACC_W-bit signed range
+    localparam longint ACC_MAX_L =  (longint'(1) <<< (ACC_W-1)) - 1;
+    localparam longint ACC_MIN_L = -(longint'(1) <<< (ACC_W-1));
 
     // ---------------- golden model ----------------
     longint model;
@@ -32,7 +37,14 @@ module tb_mac;
         if (clr)     model = en ? p : 0;
         else if (en) model = model + p;
         // wrap to ACC_W bits (same as hardware two's-complement wrap)
-        model = longint'($signed(model[ACC_W-1:0]));
+        // model = longint'($signed(model[ACC_W-1:0]));
+        // 변경 전: model = longint'($signed(model[ACC_W-1:0]));
+        if (SAT) begin
+            if      (model > ACC_MAX_L) model = ACC_MAX_L;   // 위로 고정
+            else if (model < ACC_MIN_L) model = ACC_MIN_L;   // 아래로 고정
+        end else begin
+            model = longint'($signed(model[ACC_W-1:0]));     // wrap
+        end
     endtask
 
     // drive inputs, clock once, check
@@ -93,7 +105,12 @@ module tb_mac;
         repeat (1023) drive(1, 0, -128, -128);
         $display("   acc = %0d", acc);
 
-        // ---------------- random ----------------
+        $display("-- directed: 1024 x (-128*127) = -16,646,144 (negative overflow test)");
+        drive(1, 1, -128, 127);
+        repeat (1023) drive(1, 0, -128, 127);
+        $display("   acc = %0d", acc);
+       
+       	// ---------------- random ----------------
         $display("-- random: %0d cycles", N_RAND);
         repeat (N_RAND) begin
             drive($urandom_range(0, 9) != 0,     // en  ~90%

@@ -10,11 +10,13 @@ TOP     ?= mac
 TB      ?= tb_$(TOP)
 RTL     := $(wildcard rtl/*.sv)
 TBSRC   := testbench/$(TB).sv
+ACC_W   ?= 32
+SAT     ?= 0
 
 .PHONY: sim sim-vl lint synth wave clean
 
 sim: | results
-	iverilog -g2012 -o results/$(TB).vvp $(RTL) $(TBSRC)
+	iverilog -g2012 -P$(TB).ACC_W=$(ACC_W) -P$(TB).SAT=$(SAT) -o results/$(TB).vvp $(RTL) $(TBSRC)
 	vvp -n results/$(TB).vvp | tee results/$(TB)_iverilog.log
 
 sim-vl: | results
