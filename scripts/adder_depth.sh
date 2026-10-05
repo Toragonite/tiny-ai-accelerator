@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Usage: scripts/adder_depth.sh <module> [widths...]
 #   1) exhaustive functional check at N=8 (all 65536 a,b pairs) vs. a+b
-#   2) Yosys synth (same gate mapping as `make synth`) -> longest path + cell count
+#   2) Yosys synth at each width -> longest path (gate levels) + cell count, two ways:
+#        rtl : synth -noabc  -> 2-input gates exactly as written (architecture as designed)
+#        abc : same gate mapping as `make synth`. ABC has no delay target here, so it
+#              optimizes area and can restructure a fast adder back into a slower one.
 set -euo pipefail
 TOP=${1:?module name, e.g. rca}; shift
 WIDTHS=${*:-8 16 32 64}
@@ -28,12 +31,18 @@ TB
 iverilog -g2012 -o results/adders/$TOP.vvp $SRC results/adders/tb_$TOP.sv
 vvp -n results/adders/$TOP.vvp
 
-printf "%-6s %-10s %-8s\n" N depth cells
+metrics() {   # $1 = extra synth flags, $2 = post-synth passes -> "depth cells"
+  local out
+  out=$(yosys -p "read_verilog -sv $SRC; chparam -set N $n $TOP; synth -top $TOP $1; \
+        $2 opt_clean; ltp -noff; stat" 2>&1)
+  if grep -q ERROR <<<"$out"; then grep -A3 ERROR <<<"$out" >&2; exit 1; fi
+  echo "$(grep -oP 'Longest topological path.*length=\K[0-9]+' <<<"$out" | tail -1)" \
+       "$(grep -oP 'Number of cells:\s+\K[0-9]+' <<<"$out" | tail -1)"
+}
+
+printf "%-6s %-10s %-10s %-10s %-10s\n" N rtl_depth rtl_cells abc_depth abc_cells
 for n in $WIDTHS; do
-  out=$(yosys -p "read_verilog -sv $SRC; chparam -set N $n $TOP; synth -top $TOP; \
-        abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; ltp -noff; stat" 2>&1)
-  if grep -q ERROR <<<"$out"; then grep -A3 ERROR <<<"$out"; exit 1; fi
-  d=$(grep -oP 'Longest topological path.*length=\K[0-9]+' <<<"$out" | tail -1)
-  c=$(grep -oP 'Number of cells:\s+\K[0-9]+' <<<"$out" | tail -1)
-  printf "%-6s %-10s %-8s\n" "$n" "$d" "$c"
+  read -r rd rc < <(metrics -noabc "")
+  read -r ad ac < <(metrics ""     "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX;")
+  printf "%-6s %-10s %-10s %-10s %-10s\n" "$n" "$rd" "$rc" "$ad" "$ac"
 done
